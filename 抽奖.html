@@ -1,0 +1,147 @@
+n checkActivityTime(startTimeStr){
+  if(!startTimeStr) return true;
+  const now = new Date().getTime();
+  const start = new Date(startTimeStr).getTime();
+  return now >= start;
+}
+
+function getAvailablePrizes(prizes){
+  return prizes.filter(item => item.stock > 0);
+}
+
+function drawWheel(){
+  const available = getAvailablePrizes(prizeList);
+  if(available.length === 0){
+    wheel.innerHTML = '<div class="w-full h-full flex items-center justify-center text-xl font-bold">奖品已全部抽完</div>';
+    return;
+  }
+  const seg = 360 / available.length;
+  let html = "";
+  available.forEach((p,i)=>{
+    const img = p.img ? `<img src="${p.img}">` : "";
+    html += `<div class="wheel-segment" style="background:${p.color};transform:rotate(${seg*i}deg)"><div class="prize-tag">${img}<span>${p.text}</span></div></div>`;
+  });
+  wheel.innerHTML = html;
+}
+
+function switchDoc(docId){
+  currentDocId = docId;
+  const doc = allDocs.find(d=>d.id === docId);
+  if(!doc) return;
+
+  pageTitle.innerText = doc.title;
+  maxDrawCount = doc.maxDrawCount || 0;
+  prizeList = JSON.parse(JSON.stringify(doc.prizes));
+  myPrizeList = doc.myPrizeList || [];
+  tradeData = doc.tradeData || [];
+  selectedPrize = null;
+
+  // 昵称下拉
+  let nickHtml = '<option value="">-- 选择昵称 --</option>';
+  doc.nicks.forEach(n=>nickHtml += `<option value="${n}">${n}</option>`);
+  nickSelect.innerHTML = nickHtml;
+
+  // 时间
+  const canStart = checkActivityTime(doc.startTime);
+  if(doc.startTime){
+    const fmt = doc.startTime.replace("T"," ");
+    timeTip.innerText = canStart ? `✅ 活动已开启：${fmt}` : `⏰ 未到活动时间：${fmt}`;
+  }else{
+    timeTip.innerText = "⚠️ 未设置活动开始时间";
+  }
+
+  drawWheel();
+  renderMyPrizes();
+  renderTradeList();
+  result.textContent = "";
+  wantText.value = "";
+  drawCountTip.innerText = "请选择预览昵称查看抽奖次数";
+  spinBtn.disabled = true;
+}
+
+// 保存配置
+saveSettingBtn.onclick = ()=>{
+  const doc = allDocs.find(d=>d.id === currentDocId);
+  if(!doc) return;
+  doc.title = docTitle.value.trim();
+  doc.startTime = startTime.value;
+  doc.maxDrawCount = parseInt(maxCount.value) || 0;
+  doc.nicks = nickText.value.split("\n").map(s=>s.trim()).filter(s=>s);
+  try{
+    doc.prizes = JSON.parse(prizeText.value);
+  }catch(e){
+    return alert("奖品JSON格式错误！");
+  }
+  saveAllData();
+  switchDoc(currentDocId);
+  settingPanel.classList.add("hide");
+  alert("配置保存成功");
+};
+
+// 新建/重命名/删除
+newDocBtn.onclick = ()=>{
+  const newDoc = getDefaultDoc();
+  allDocs.push(newDoc);
+  saveAllData();
+  renderDocSelect();
+  switchDoc(newDoc.id);
+};
+renameDocBtn.onclick = ()=>{
+  const doc = allDocs.find(d=>d.id === currentDocId);
+  const name = prompt("输入活动名称", doc.name);
+  if(name && name.trim()){
+    doc.name = name.trim();
+    saveAllData();
+    renderDocSelect();
+  }
+};
+delDocBtn.onclick = ()=>{
+  if(allDocs.length <= 1) return alert("至少保留一个活动");
+  if(!confirm("确定删除？")) return;
+  const idx = allDocs.findIndex(d=>d.id === currentDocId);
+  allDocs.splice(idx,1);
+  saveAllData();
+  renderDocSelect();
+  switchDoc(allDocs[0].id);
+};
+
+// 面板切换
+openSettingBtn.onclick = ()=>{
+  const doc = allDocs.find(d=>d.id === currentDocId);
+  docTitle.value = doc.title;
+  startTime.value = doc.startTime || "";
+  maxCount.value = doc.maxDrawCount || 3;
+  nickText.value = (doc.nicks || []).join("\n");
+  prizeText.value = JSON.stringify(doc.prizes, null, 2);
+  settingPanel.classList.remove("hide");
+  dataPanel.classList.add("hide");
+};
+closeSettingBtn.onclick = ()=>settingPanel.classList.add("hide");
+openDataBtn.onclick = ()=>{
+  dataPanel.classList.remove("hide");
+  settingPanel.classList.add("hide");
+  refreshDataTable();
+};
+closeDataBtn.onclick = ()=>dataPanel.classList.add("hide");
+
+// 刷新数据表格
+function refreshDataTable(){
+  const doc = allDocs.find(d=>d.id === currentDocId);
+  // 人员奖品
+  let uHtml = `<table><tr><th>昵称</th><th>已抽次数</th><th>拥有奖品</th></tr>`;
+  let uText = "昵称\t已抽次数\t拥有奖品\n";
+  for(let n of doc.nicks){
+    let cnt = doc.userDrawCount[n] || 0;
+    let prize = doc.userAllPrize[n] ? doc.userAllPrize[n].join("、") : "无";
+    uHtml += `<tr><td>${n}</td><td>${cnt}/${doc.maxDrawCount}</td><td>${prize}</td></tr>`;
+    uText += `${n}\t${cnt}/${doc.maxDrawCount}\t${prize}\n`;
+  }
+  uHtml += `</table>`;
+  userPrizeTable.innerHTML = uHtml;
+  window.userPrizeCopy = uText;
+
+  // 置换记录
+  let tHtml = `<table><tr><th>时间</th><th>出让人</th><th>出让奖品</th><th>兑换人</th><th>兑换奖品</th></tr>`;
+  let tText = "时间\t出让人\t出让奖品\t兑换人\t兑换奖品\n";
+  (doc.tradeRecord || []).forEach(r=>{
+    tHtml += `<tr><td>${r.time}</td><td>${r.from}</td><td>${r.give}</td><td>${r.to}</td><td>
